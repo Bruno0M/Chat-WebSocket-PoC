@@ -6,16 +6,23 @@ namespace ChatWebSocketPoC.Services
 {
     public class ChatHandler : IWebSocketHandler
     {
-        private static readonly ConcurrentDictionary<string, ConcurrentBag<WebSocket>> Channels = new();
-        public async Task HandleWebSocketConnection(HttpContext context, WebSocket webSocket, string channelName)
+        private static readonly ConcurrentDictionary<string, ConcurrentDictionary<string, WebSocket>> Channels = new();
+        public async Task HandleWebSocketConnection(HttpContext context, WebSocket webSocket, string channelName, string username)
         {
-            var channel = Channels.GetOrAdd(channelName, _ => new ConcurrentBag<WebSocket>());
-            channel.Add(webSocket);
+            var channel = Channels.GetOrAdd(channelName, _ => new ConcurrentDictionary<string, WebSocket>());
+            if (!channel.TryAdd(username, webSocket))
+            {
+                await context.Response.WriteAsync("Username already taken in this channel.");
+                return;
+            }
 
-            await ReceiveMessagesAsync(context, webSocket, channelName);
+            var userConnected = $"{username} connected";
+
+            await BroadcastMessageToChannel(channelName, userConnected);
+            await ReceiveMessagesAsync(context, webSocket, channelName, username);
         }
 
-        public async Task ReceiveMessagesAsync(HttpContext context, WebSocket webSocket, string channelName)
+        public async Task ReceiveMessagesAsync(HttpContext context, WebSocket webSocket, string channelName, string username)
         {
             var buffer = new byte[1024 * 4];
             var result = await webSocket.ReceiveAsync(buffer, CancellationToken.None);
@@ -23,11 +30,16 @@ namespace ChatWebSocketPoC.Services
             while (!result.CloseStatus.HasValue)
             {
                 var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                await BroadcastMessageToChannel(channelName, message);
+                var fullMessage = $"{username}: {message}";
+                await BroadcastMessageToChannel(channelName, fullMessage);
 
                 result = await webSocket.ReceiveAsync(buffer, CancellationToken.None);
             }
-            Channels[channelName].TryTake(out _);
+
+            var userDisconnected = $"{username} disconnected";
+            await BroadcastMessageToChannel(channelName, userDisconnected);
+
+            Channels[channelName].TryRemove(username, out _);
             await webSocket.CloseAsync(result.CloseStatus.Value, result.CloseStatusDescription, CancellationToken.None);
         }
 
@@ -38,7 +50,7 @@ namespace ChatWebSocketPoC.Services
                 var messageBuffer = Encoding.UTF8.GetBytes(message);
                 var messageSegment = new ArraySegment<byte>(messageBuffer);
 
-                foreach (var socket in channel)
+                foreach (var socket in channel.Values)
                 {
                     if (socket.State == WebSocketState.Open)
                     {

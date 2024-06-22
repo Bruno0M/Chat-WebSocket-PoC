@@ -6,22 +6,21 @@ namespace ChatWebSocketPoC.Controllers
 {
     //[Route("api/[controller]")]
     [ApiController]
-    public class WebSocketController : ControllerBase
+    public class ChatController : ControllerBase
     {
         private readonly IWebSocketHandler _socketHandler;
 
-        public WebSocketController(IWebSocketHandler socketHandler)
+        public ChatController(IWebSocketHandler socketHandler)
         {
             _socketHandler = socketHandler;
         }
 
         [HttpGet("ws")]
-        public async Task<IActionResult> ConnectChannel(string channel)
+        public async Task<IActionResult> ConnectChannel(string channel, string username)
         {
             if (HttpContext.WebSockets.IsWebSocketRequest)
             {
-                var channelName = HttpContext.Request.Query["channel"];
-                if (string.IsNullOrEmpty(channelName))
+                if (string.IsNullOrEmpty(channel))
                 {
                     HttpContext.Response.StatusCode = 400;
                     await HttpContext.Response.WriteAsync("Channel name is required");
@@ -29,7 +28,7 @@ namespace ChatWebSocketPoC.Controllers
                 }
 
                 var webSokcet = await HttpContext.WebSockets.AcceptWebSocketAsync();
-                await _socketHandler.HandleWebSocketConnection(HttpContext, webSokcet, channelName);
+                await _socketHandler.HandleWebSocketConnection(HttpContext, webSokcet, channel, username);
             }
 
             return Ok();
